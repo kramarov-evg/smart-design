@@ -1,28 +1,28 @@
 import json
-from bson.errors import InvalidId
-from flask import jsonify, Blueprint, abort, request
+
 from bson import ObjectId, json_util
 from extensions import mongo
-from werkzeug.exceptions import BadRequest, NotFound, UnprocessableEntity
+from flask import jsonify, Blueprint, abort, request
+from werkzeug.exceptions import BadRequest, UnprocessableEntity
 
 bp = Blueprint('test', __name__)
 
-
+# Endpoint for adding items. Accepts item's fields as json
 @bp.route('/products/add', methods=['POST'])
 def add_product():
+    new_product = {}
     try:
-        name = request.json['name']
-        description = request.json['description']
-        params = dict(request.json['params'])
+        new_product['name'] = request.json['name']
+        new_product['description'] = request.json['description']
     except KeyError as e:
         abort(UnprocessableEntity)
-    except:
-        abort(BadRequest)
-    inserted_val = mongo.db.products.insert_one({
-        'name': name,
-        'description': description,
-        'params': params
-    })
+    extra_params = request.json.get('params', None)
+    if extra_params is not None:
+        try:
+            new_product['params'] = dict(extra_params)
+        except:
+            abort(BadRequest)
+    inserted_val = mongo.db.products.insert_one(new_product)
     return product_details_by_id(inserted_val.inserted_id)
 
 
@@ -31,17 +31,22 @@ def search_product():
     query_criterias = {}
     requested_name = request.json.get('name', None)
     if requested_name:
-        name_criteria = construct_criteria(requested_name)
+        try:
+            name_criteria = construct_criteria(requested_name)
+        except ValueError:
+            abort(UnprocessableEntity)
         query_criterias['name'] = name_criteria
         request.json.pop('name')
     for param_name in request.json.keys():
-        criteria = construct_criteria(request.json[param_name])
+        try:
+            criteria = construct_criteria(request.json[param_name])
+        except ValueError:
+            abort(UnprocessableEntity)
         real_param_name = f'params.{param_name}'
         query_criterias[real_param_name] = criteria
 
     products = mongo.db.products.find(query_criterias)
     products_sanitazied = json.loads(json_util.dumps(products))
-    print(query_criterias)
     return jsonify(products_sanitazied)
 
 
@@ -63,7 +68,6 @@ def bad_request_to_json(error):
 
 
 def construct_criteria(queried_field):
-    print(queried_field)
     string_methods_to_regexps = {
         'exact': '^{}$',
         'startsWith': '^{}',
